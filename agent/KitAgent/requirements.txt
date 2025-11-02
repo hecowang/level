@@ -1,0 +1,7 @@
+fastapi==0.116.1
+prometheus_fastapi_instrumentator==7.1.0
+pydantic==2.11.7
+pydantic_settings==2.10.1
+python-dotenv==1.1.1
+starlette==0.47.2
+uvicorn==0.35.0
