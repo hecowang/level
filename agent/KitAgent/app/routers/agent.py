@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from app.services.agent_service import start_task, get_task_result
-from app.services.websocket_chat_agent import ChatService as WebSocketChatService
+from app.services.chat_agent import ChatAgent
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -28,10 +28,10 @@ async def do_chat(websocket: WebSocket):
     - 客户端发送: {"type": "chat", "data": {"content": "...", "message_type": "text/audio"}}
     """
     # 创建 ChatService 实例并启动会话处理
-    chat_service = WebSocketChatService(websocket)
+    chat_agent = ChatAgent(websocket)
     
     try:
-        await chat_service.start()
+        await chat_agent.start()  # 启动会话处理
     except WebSocketDisconnect:
         # WebSocket 正常断开，已在 ChatAgent 中记录日志
         pass
@@ -226,4 +226,16 @@ async def chat_test_page():
     </html>
     """
     return HTMLResponse(content=html)
+
+@router.get("/agent/client")
+async def chat_client_page():
+    """返回完整的语音交互客户端页面"""
+    try:
+        with open("app/routers/client.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(content="客户端页面未找到", status_code=404)
+    except Exception as e:
+        return HTMLResponse(content=f"读取页面错误: {str(e)}", status_code=500)
 

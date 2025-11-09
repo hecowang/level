@@ -11,8 +11,6 @@ load_dotenv(dotenv_path=str(env_path), override=True)
 
 class Settings(BaseSettings):
     """应用配置 - 从环境变量读取"""
-    
-    # 应用配置
     APP_NAME: str = os.getenv("APP_NAME", "AI Agent Server")
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     API_V1_STR: str = os.getenv("API_V1_STR", "/api/v1")
@@ -25,7 +23,7 @@ class Settings(BaseSettings):
     MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     API_KEY: str = os.getenv("API_KEY", "")
-    API_KEYS: str = os.getenv("API_KEYS", "")
+    API_KEYS: str = os.getenv("API_KEYS", "111111,222222,333333")
     
     # LangChain Agent 配置
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))

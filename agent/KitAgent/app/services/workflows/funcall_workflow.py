@@ -3,6 +3,8 @@ from typing import Dict, Any
 from app.models.intent import IntentType
 from app.services.workflows.base_workflow import BaseWorkflow
 from app.utils.logger import logger
+from app.models.chat_context import ChatContext
+from app.services.tts.volcengine.binary import do_tts
 
 
 class FuncallWorkflow(BaseWorkflow):
@@ -12,21 +14,20 @@ class FuncallWorkflow(BaseWorkflow):
     def intent_type(self) -> IntentType:
         return IntentType.FUNCALL
     
-    async def execute(self, user_input: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, chat_context: ChatContext) -> Dict[str, Any]:
         """
         执行 FunCall 工作流
         
         Args:
-            user_input: 用户输入
-            context: 上下文信息（可能包含设备信息）
+            chat_context: 聊天上下文对象，包含用户输入和上下文信息
         
         Returns:
             函数调用结果
         """
+        user_input = chat_context.query or ""
+        device_id = chat_context.device_id
+        
         try:
-            context = context or {}
-            device_id = context.get("device_id")
-            
             logger.info(f"FunCall 工作流：设备 {device_id}，请求 '{user_input}'")
             
             user_input_lower = user_input.lower()
@@ -50,6 +51,14 @@ class FuncallWorkflow(BaseWorkflow):
             else:
                 reply = f"收到功能调用请求：{user_input}"
                 action = "unknown"
+            
+            # 流式返回文本并转换为语音
+            if chat_context.agent and hasattr(chat_context.agent, 'send_audio'):
+                try:
+                    async for audio_chunk in do_tts(reply):
+                        await chat_context.agent.send_audio(audio_chunk)
+                except Exception as e:
+                    logger.error(f"TTS转换失败: {e}", exc_info=True)
             
             return {
                 "success": True,

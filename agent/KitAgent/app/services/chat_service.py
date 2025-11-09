@@ -105,6 +105,9 @@ class ChatService:
         Returns:
             是否有效
         """
+        for api in self.valid_api_keys:
+            print("api", api)
+        print(api_key)
         is_valid = api_key in self.valid_api_keys
         if is_valid:
             logger.info(f"API Key 验证成功")

@@ -13,10 +13,10 @@ def setup_logging() -> None:
         "disable_existing_loggers": False,
         "formatters": {
             "default": {
-                "format": "[%(asctime)s][%(name)s][%(levelname)s][%(trace_id)s]\t%(message)s",
+                "format": "[%(asctime)s][%(name)s][%(levelname)s][%(trace_id)s][%(filename)s:%(lineno)d]\t%(message)s",
             },
             "access": {
-                "format": "[%(asctime)s][%(levelname)s][%(trace_id)s]\t%(message)s",
+                "format": "[%(asctime)s][%(levelname)s][%(trace_id)s][%(filename)s:%(lineno)d]\t%(message)s",
             },
         },
         "filters": {

@@ -2,6 +2,7 @@
 import asyncio
 import uuid
 from typing import Dict, List, Any, Optional
+from app.models.chat_context import ChatContext
 from app.services.intent_classifier import intent_classifier
 from app.services.workflows.chat_workflow import ChatWorkflow
 from app.services.workflows.search_workflow import SearchWorkflow
@@ -32,7 +33,8 @@ class AgentService:
         """初始化 Agent 服务"""
         self.workflows = WORKFLOW_MAP
     
-    async def process(self, user_input: str, device_id: str = None, conversation_history: List[dict] = None) -> Dict[str, Any]:
+    # async def process(self, user_input: str, device_id: str = None, conversation_history: List[dict] = None) -> Dict[str, Any]:
+    async def process(self, chat_context: ChatContext) -> Dict[str, Any]:
         """
         处理用户输入的主流程
         
@@ -51,10 +53,10 @@ class AgentService:
             处理结果字典
         """
         try:
-            logger.info(f"Agent 开始处理用户输入: {user_input[:50]}...")
+            logger.info(f"Agent 开始处理用户输入: {chat_context.query[:50]}...")
             
             # 步骤 1: 意图分类
-            intent_result = await intent_classifier.classify(user_input, conversation_history)
+            intent_result = await intent_classifier.classify(chat_context.query, chat_context.conversation_history)
             logger.info(f"意图分类结果: {intent_result.intent.value} (置信度: {intent_result.confidence:.2f})")
             
             # 步骤 2: 选择工作流
@@ -64,16 +66,12 @@ class AgentService:
                 workflow = self.workflows[IntentType.CHAT]
             
             # 步骤 3: 执行工作流
-            context = {
-                "device_id": device_id,
-                "conversation_history": conversation_history or [],
-                "intent": intent_result.intent.value,
-                "intent_confidence": intent_result.confidence,
-                "intent_reasoning": intent_result.reasoning,
-                "entities": intent_result.entities
-            }
+            chat_context.intent = intent_result.intent.value,
+            chat_context.intent_confidence =  intent_result.confidence,
+            chat_context.intent_reasoning = intent_result.reasoning,
+            chat_context.entities = intent_result.entities
             
-            result = await workflow.execute(user_input, context)
+            result = await workflow.execute(chat_context)
             
             # 步骤 4: 添加意图信息到结果
             result["intent"] = intent_result.intent.value
