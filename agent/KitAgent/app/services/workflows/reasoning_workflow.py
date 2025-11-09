@@ -5,6 +5,8 @@ from app.models.intent import IntentType
 from app.services.workflows.base_workflow import BaseWorkflow
 from app.config import settings
 from app.utils.logger import logger
+from app.models.chat_context import ChatContext
+from app.services.tts.volcengine.binary import do_tts
 
 
 class ReasoningWorkflow(BaseWorkflow):
@@ -27,22 +29,24 @@ class ReasoningWorkflow(BaseWorkflow):
                     model=settings.MODEL_NAME,
                     temperature=0.3,  # 推理任务使用较低温度
                     max_tokens=settings.LLM_MAX_TOKENS,
-                    api_key=settings.OPENAI_API_KEY
+                    api_key=settings.OPENAI_API_KEY,
+                    streaming=True  # 启用流式
                 )
         except Exception as e:
             logger.error(f"初始化推理 LLM 失败: {e}")
     
-    async def execute(self, user_input: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, chat_context: ChatContext) -> Dict[str, Any]:
         """
         执行推理计算工作流
         
         Args:
-            user_input: 用户输入
-            context: 上下文信息
+            chat_context: 聊天上下文对象，包含用户输入和上下文信息
         
         Returns:
             推理结果
         """
+        user_input = chat_context.query or ""
+        
         try:
             if self.llm:
                 # 构建提示词
@@ -57,22 +61,41 @@ class ReasoningWorkflow(BaseWorkflow):
 4. 给出最终答案
 """
                 
-                # 调用 LLM
-                if hasattr(self.llm, 'ainvoke'):
-                    response = await self.llm.ainvoke([("human", prompt)])
-                else:
-                    response = self.llm.invoke([("human", prompt)])
-                
-                reply = response.content if hasattr(response, 'content') else str(response)
+                # 流式调用 LLM
+                full_reply = ""
+                async for chunk in self.llm.astream([("human", prompt)]):
+                    if hasattr(chunk, 'content'):
+                        reply_chunk = chunk.content
+                    else:
+                        reply_chunk = str(chunk)
+                    
+                    full_reply += reply_chunk
+                    
+                    # 立即将每个chunk发送给TTS
+                    if chat_context.agent and hasattr(chat_context.agent, 'send_audio'):
+                        try:
+                            async for audio_chunk in do_tts(reply_chunk):
+                                await chat_context.agent.send_audio(audio_chunk)
+                        except Exception as e:
+                            logger.error(f"TTS转换失败: {e}", exc_info=True)
                 
                 return {
                     "success": True,
-                    "reply": reply,
+                    "reply": full_reply,
                     "workflow": "reasoning"
                 }
             else:
                 # 简单计算模拟
                 reply = f"正在进行推理计算：{user_input}。推理功能需要配置 LLM。"
+                
+                # 流式返回文本并转换为语音
+                if chat_context.agent and hasattr(chat_context.agent, 'send_audio'):
+                    try:
+                        async for audio_chunk in do_tts(reply):
+                            await chat_context.agent.send_audio(audio_chunk)
+                    except Exception as e:
+                        logger.error(f"TTS转换失败: {e}", exc_info=True)
+                
                 return {
                     "success": True,
                     "reply": reply,

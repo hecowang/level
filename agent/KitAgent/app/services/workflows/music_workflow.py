@@ -3,6 +3,8 @@ from typing import Dict, Any
 from app.models.intent import IntentType
 from app.services.workflows.base_workflow import BaseWorkflow
 from app.utils.logger import logger
+from app.models.chat_context import ChatContext
+from app.services.tts.volcengine.binary import do_tts
 
 
 class MusicWorkflow(BaseWorkflow):
@@ -12,17 +14,18 @@ class MusicWorkflow(BaseWorkflow):
     def intent_type(self) -> IntentType:
         return IntentType.MUSIC
     
-    async def execute(self, user_input: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, chat_context: ChatContext) -> Dict[str, Any]:
         """
         执行播放音乐工作流
         
         Args:
-            user_input: 用户输入
-            context: 上下文信息
+            chat_context: 聊天上下文对象，包含用户输入和上下文信息
         
         Returns:
             音乐操作结果
         """
+        user_input = chat_context.query or ""
+        
         try:
             # TODO: 集成音乐服务 API（如 Spotify, QQ Music, NetEase Cloud Music 等）
             logger.info(f"音乐工作流：处理请求 '{user_input}'")
@@ -47,6 +50,14 @@ class MusicWorkflow(BaseWorkflow):
             else:
                 reply = f"收到音乐相关请求：{user_input}"
                 action = "unknown"
+            
+            # 流式返回文本并转换为语音
+            if chat_context.agent and hasattr(chat_context.agent, 'send_audio'):
+                try:
+                    async for audio_chunk in do_tts(reply):
+                        await chat_context.agent.send_audio(audio_chunk)
+                except Exception as e:
+                    logger.error(f"TTS转换失败: {e}", exc_info=True)
             
             return {
                 "success": True,

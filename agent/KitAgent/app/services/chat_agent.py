@@ -7,10 +7,11 @@ from app.services.chat_service import chat_service
 from app.services.agent_service import agent_service
 from app.services.chat_state_machine import ChatStateMachine, ChatState
 from app.models.chat_message import ServerResponse
+from app.models.chat_context import ChatContext
 from app.utils.logger import logger
 
 
-class ChatService:
+class ChatAgent:
     """
     Chat Service 会话处理类
     管理单个 WebSocket 连接的状态机和消息处理
@@ -43,6 +44,25 @@ class ChatService:
             data=data
         )
         await self.websocket.send_text(response.model_dump_json())
+    
+    async def send_text(self, text: str):
+        await self.send_response("text", "success", text)
+    
+    async def send_audio(self, audio_data: bytes, audio_format: str = "mp3"):
+        """
+        发送音频数据到客户端
+        
+        Args:
+            audio_data: 音频二进制数据
+            audio_format: 音频格式 (mp3/wav等)
+        """
+        try:
+            # 发送音频数据
+            await self.websocket.send_bytes(audio_data)
+            logger.info(f"已发送音频数据: {len(audio_data)} 字节, 格式: {audio_format}")
+        except Exception as e:
+            logger.error(f"发送音频数据失败: {e}", exc_info=True)
+            raise
     
     async def handle_auth(self, message_data: dict):
         """
@@ -175,15 +195,16 @@ class ChatService:
         
         logger.info(f"设备 {device_id} 收到消息: {message_type} - {len(content)} 字符")
         
-        # 获取对话上下文
-        conversation_history = chat_service.get_conversation_context(device_id)
+        context = ChatContext(
+            query=content,
+            device_id=device_id,
+            conversation_history=chat_service.get_conversation_context(device_id),
+            agent=self,
+            metadata={},
+        )
         
         # 调用 Agent 服务处理消息（基于 LangChain 的意图分类和工作流）
-        agent_result = await agent_service.process(
-            user_input=content,
-            device_id=device_id,
-            conversation_history=conversation_history
-        )
+        agent_result = await agent_service.process(context)
         
         # 获取 Agent 回复
         assistant_response = agent_result.get("reply", "抱歉，未能生成回复。")
@@ -201,7 +222,7 @@ class ChatService:
                 "response": assistant_response,
                 "intent": intent,
                 "workflow": workflow,
-                "context_count": len(conversation_history)
+                "context_count": len(context.conversation_history)
             }
         )
     
@@ -287,6 +308,8 @@ class ChatService:
         message_type = message_data.get("type")
         current_state = self.state_machine.get_state()
         
+        logger.info(f"处理消息类型: {message_type}，当前状态: {current_state.value}")
+        
         # 根据消息类型分发处理
         if message_type == "auth":
             await self.handle_auth(message_data)
@@ -324,11 +347,13 @@ class ChatService:
             while True:
                 # 接收数据
                 data = await self.websocket.receive()
+                logger.info(f"收到数据: {data}...")
+                logger.info(f"{type(data)}")
                 
-                # 处理文本消息（JSON 格式）
-                if "text" in data:
+                # 处理文本消息（JSON 格式)）
+                if 'text' in data:
                     try:
-                        message_data = json.loads(data["text"])
+                        message_data = json.loads(data.get("text", "{}"))
                         await self.process_message(message_data)
                     except json.JSONDecodeError:
                         await self.send_response(
@@ -347,8 +372,8 @@ class ChatService:
                         )
                 
                 # 处理二进制数据（语音）
-                elif "bytes" in data:
-                    audio_data = data["bytes"]
+                else:
+                    audio_data = data
                     try:
                         await self.on_audio(audio_data)
                     except Exception as e:
@@ -359,8 +384,6 @@ class ChatService:
                             f"处理音频时出错: {str(e)}",
                             {"state": self.state_machine.get_state().value}
                         )
-                else:
-                    logger.warning(f"收到未知类型数据: {data}")
         
         except Exception as e:
             device_id = self.state_machine.device_id

@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 from app.models.intent import IntentType
+from app.models.chat_context import ChatContext
 
 
 class BaseWorkflow(ABC):
@@ -14,13 +15,12 @@ class BaseWorkflow(ABC):
         pass
     
     @abstractmethod
-    async def execute(self, user_input: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, chat_context: ChatContext) -> Dict[str, Any]:
         """
         执行工作流
         
         Args:
-            user_input: 用户输入
-            context: 上下文信息（可能包含对话历史、设备信息等）
+            chat_context: 聊天上下文对象，包含用户输入和上下文信息
         
         Returns:
             执行结果字典
