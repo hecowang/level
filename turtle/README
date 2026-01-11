@@ -1,0 +1,12 @@
+
+
+command:
+    fastapi dev app/main.py
+
+requirements gen:
+   pipreqs app --encoding=utf8 --force --savepath ./requirements.txt
+
+
+docker:
+   docker build -t my-fastapi-app . --platform linux/amd64
+   docker run -d --name my-fastapi -p 8000:8000 my-fastapi-app -v /var/logs/rtc-ai-agent-jx:/service/logs

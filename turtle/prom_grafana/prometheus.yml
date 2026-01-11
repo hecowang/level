@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s   # 每5秒抓取一次
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "fastapi_service"
+    metrics_path: /metrics   # FastAPI metrics 地址
+    static_configs:
+      - targets: ["10.164.105.36:8606"]  # 你的 FastAPI 主机 + 端口
