@@ -150,6 +150,26 @@ async def get_index_stocks(index_type: str) -> List[Dict]:
             return [dict(row) for row in rows]
 
 
+async def get_stock_name(code: str) -> Optional[str]:
+    """
+    根据股票代码获取股票名称
+    
+    Args:
+        code: 股票代码
+    
+    Returns:
+        股票名称，如果未找到则返回None
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT name FROM index_stocks WHERE code = ? LIMIT 1",
+            (code,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row['name'] if row and row['name'] else None
+
+
 async def get_stock_count(index_type: str) -> int:
     """获取指定指数的成分股数量"""
     async with aiosqlite.connect(DB_PATH) as db:

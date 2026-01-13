@@ -23,7 +23,8 @@ from app.services.background_tasks import (
 )
 from app.services.database import (
     init_db, get_index_stocks, get_stock_count,
-    get_stock_data_last_update_date, get_stock_daily_data_from_db
+    get_stock_data_last_update_date, get_stock_daily_data_from_db,
+    get_stock_name
 )
 from app.services.search_gold import run_search_gold_task
 from app.services.search_macd_gold import run_search_macd_gold_task
@@ -162,6 +163,20 @@ class StockDataResponse(BaseModel):
     source: Optional[str] = "api"
 
 
+class StockIndicatorsResponse(BaseModel):
+    """股票指标响应模型"""
+    code: str
+    name: Optional[str] = Field(None, description="股票名称")
+    success: bool
+    message: str
+    close: float = Field(..., description="最新收盘价")
+    high_20: float = Field(..., description="20日最高价")
+    high_55: float = Field(..., description="55日最高价")
+    low_10: float = Field(..., description="10日最低价")
+    low_20: float = Field(..., description="20日最低价")
+    atr_20: float = Field(..., description="20日ATR（平均真实波幅）")
+
+
 class MCPTool(BaseModel):
     """MCP工具定义"""
     name: str
@@ -249,6 +264,98 @@ async def get_stock_data_post(request: StockQueryRequest):
         start_date=request.start_date,
         end_date=request.end_date
     )
+
+
+@router.get("/api/indicators", response_model=StockIndicatorsResponse)
+async def get_stock_indicators(
+    code: str = Query(..., description="股票代码，例如：sh.600000")
+):
+    """
+    获取股票技术指标
+    
+    返回以下指标：
+    - close: 最新收盘价
+    - high_20: 20日最高价
+    - high_55: 55日最高价
+    - low_10: 10日最低价
+    - low_20: 20日最低价
+    - atr_20: 20日ATR（平均真实波幅）
+    
+    Args:
+        code: 股票代码，例如：sh.600000（上海）或 sz.000001（深圳）
+    
+    Returns:
+        股票技术指标数据
+    """
+    try:
+        # 计算需要获取的数据范围（至少需要55天来计算high_55）
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=120)  # 多获取几天以确保有足够数据
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        
+        # 从数据库获取股票数据
+        stock_data = await get_stock_daily_data_from_db(code, start_date_str, end_date_str)
+        
+        if not stock_data:
+            raise HTTPException(status_code=404, detail=f"未找到股票 {code} 的数据")
+        
+        # 转换为DataFrame
+        df = pd.DataFrame(stock_data)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        # 确保数值列是数值类型
+        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        if len(df) < 55:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"数据不足，需要至少55天数据，当前只有 {len(df)} 天"
+            )
+        
+        # 获取最新收盘价
+        close = float(df['close'].iloc[-1])
+        
+        # 计算最高价和最低价
+        high_20 = float(df['high'].tail(20).max())
+        high_55 = float(df['high'].tail(55).max())
+        low_10 = float(df['low'].tail(10).min())
+        low_20 = float(df['low'].tail(20).min())
+        
+        # 计算ATR（平均真实波幅）
+        # True Range = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        df['prev_close'] = df['close'].shift(1)
+        df['tr1'] = df['high'] - df['low']
+        df['tr2'] = abs(df['high'] - df['prev_close'])
+        df['tr3'] = abs(df['low'] - df['prev_close'])
+        df['true_range'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+        
+        # 计算20日ATR（使用简单移动平均）
+        atr_20 = float(df['true_range'].tail(20).mean())
+        
+        # 获取股票名称
+        stock_name = await get_stock_name(code)
+        
+        return StockIndicatorsResponse(
+            code=code,
+            name=stock_name,
+            success=True,
+            message="获取成功",
+            close=close,
+            high_20=high_20,
+            high_55=high_55,
+            low_10=low_10,
+            low_20=low_20,
+            atr_20=atr_20
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取股票 {code} 指标失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取股票指标失败: {str(e)}")
 
 
 @router.get("/api/list/hs300")
