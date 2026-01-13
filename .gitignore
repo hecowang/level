@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+uploads/
+*.wav
+*.mp3
+*.ogg
+*.m4a
+logs/
+*.log
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+# uv 相关
+.uv/
+# pytest 相关
+.pytest_cache/
+.coverage
+htmlcov/
+*.pyc
+

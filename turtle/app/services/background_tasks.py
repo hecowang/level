@@ -19,12 +19,14 @@ logger = logging.getLogger(__name__)
 
 # 重试配置
 MAX_RETRIES = 3  # 最大重试次数
-RETRY_DELAY = 2  # 重试延迟（秒）
+RETRY_DELAY = 3  # 重试延迟（秒），增加延迟给网络更多恢复时间
 
 
-def retry_on_failure(func: Callable, max_retries: int = MAX_RETRIES, delay: float = RETRY_DELAY, *args, **kwargs) -> Any:
+def retry_on_failure(func: Callable, max_retries: int = MAX_RETRIES, 
+    delay: float = RETRY_DELAY, *args, **kwargs) -> Any:
     """
     重试装饰器函数，在失败时自动重试
+    支持处理编码错误、网络错误等异常
     
     Args:
         func: 要执行的函数
@@ -39,14 +41,42 @@ def retry_on_failure(func: Callable, max_retries: int = MAX_RETRIES, delay: floa
     for attempt in range(max_retries):
         try:
             return func(*args, **kwargs)
-        except Exception as e:
+        except (UnicodeDecodeError, UnicodeError) as e:
+            # 编码错误，需要重试
             last_exception = e
             if attempt < max_retries - 1:
                 wait_time = delay * (attempt + 1)  # 指数退避
-                logger.warning(f"第 {attempt + 1} 次尝试失败: {str(e)}，{wait_time}秒后重试...")
+                logger.warning(f"第 {attempt + 1} 次尝试失败（编码错误）: {str(e)}，{wait_time}秒后重试...")
                 time.sleep(wait_time)
             else:
-                logger.error(f"重试 {max_retries} 次后仍然失败: {str(e)}")
+                logger.error(f"重试 {max_retries} 次后仍然失败（编码错误）: {str(e)}")
+                raise last_exception
+        except (IndexError, KeyError) as e:
+            # 数据解析错误，可能是网络数据不完整，需要重试
+            last_exception = e
+            if attempt < max_retries - 1:
+                wait_time = delay * (attempt + 1)
+                logger.warning(f"第 {attempt + 1} 次尝试失败（数据解析错误）: {str(e)}，{wait_time}秒后重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"重试 {max_retries} 次后仍然失败（数据解析错误）: {str(e)}")
+                raise last_exception
+        except Exception as e:
+            # 其他异常（包括网络错误等）
+            error_msg = str(e)
+            # 检查是否是网络相关错误
+            is_network_error = any(keyword in error_msg for keyword in [
+                '网络', '接收', '连接', 'timeout', 'network', 'connection'
+            ])
+            
+            last_exception = e
+            if attempt < max_retries - 1:
+                wait_time = delay * (attempt + 1)  # 指数退避
+                error_type = "网络错误" if is_network_error else "错误"
+                logger.warning(f"第 {attempt + 1} 次尝试失败（{error_type}）: {error_msg}，{wait_time}秒后重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"重试 {max_retries} 次后仍然失败: {error_msg}")
                 raise last_exception
     raise last_exception
 
@@ -62,15 +92,28 @@ async def fetch_and_save_hs300():
         # 在后台线程中执行同步操作，带重试逻辑
         # 每次重试都会重新创建 BaoStockWrapper（重新登录）
         def fetch_hs300():
-            with BaoStockWrapper() as bs_wrapper:
-                rs = bs.query_hs300_stocks()
-                if rs.error_code != "0":
-                    raise Exception(f"查询失败: {rs.error_msg}")
-                stocks = []
-                fields = rs.fields if hasattr(rs, 'fields') else []
-                while (rs.error_code == '0') & rs.next():
-                    stocks.append(rs.get_row_data())
-                return stocks, fields
+            try:
+                with BaoStockWrapper() as bs_wrapper:
+                    rs = bs.query_hs300_stocks()
+                    if rs is None:
+                        raise Exception("查询结果为空")
+                    if rs.error_code != "0":
+                        raise Exception(f"查询失败: {rs.error_msg}")
+                    stocks = []
+                    fields = rs.fields if hasattr(rs, 'fields') else []
+                    try:
+                        while (rs.error_code == '0') & rs.next():
+                            stocks.append(rs.get_row_data())
+                    except (UnicodeDecodeError, UnicodeError, IndexError, KeyError) as e:
+                        # 读取数据时的编码或解析错误
+                        logger.warning(f"读取数据时出错: {str(e)}，已获取 {len(stocks)} 条记录")
+                        # 如果已经获取到一些数据，返回部分数据
+                        if len(stocks) == 0:
+                            raise
+                    return stocks, fields
+            except Exception as e:
+                # 确保异常被正确传播
+                raise
         
         # 使用重试逻辑，每次重试都会重新创建 session
         stocks, fields = await loop.run_in_executor(
@@ -98,17 +141,30 @@ async def fetch_and_save_zz500():
         
         # 在后台线程中执行同步操作，带重试逻辑
         def fetch_zz500():
-            with BaoStockWrapper() as bs_wrapper:
-                rs = bs.query_zz500_stocks()
-                if rs.error_code != "0":
-                    raise Exception(f"查询失败: {rs.error_msg}")
-                stocks = []
-                fields = rs.fields if hasattr(rs, 'fields') else []
-                while (rs.error_code == '0') & rs.next():
-                    stocks.append(rs.get_row_data())
-                return stocks, fields
+            try:
+                with BaoStockWrapper() as bs_wrapper:
+                    rs = bs.query_zz500_stocks()
+                    if rs is None:
+                        raise Exception("查询结果为空")
+                    if rs.error_code != "0":
+                        raise Exception(f"查询失败: {rs.error_msg}")
+                    stocks = []
+                    fields = rs.fields if hasattr(rs, 'fields') else []
+                    try:
+                        while (rs.error_code == '0') & rs.next():
+                            stocks.append(rs.get_row_data())
+                    except (UnicodeDecodeError, UnicodeError, IndexError, KeyError) as e:
+                        # 读取数据时的编码或解析错误
+                        logger.warning(f"读取数据时出错: {str(e)}，已获取 {len(stocks)} 条记录")
+                        # 如果已经获取到一些数据，返回部分数据
+                        if len(stocks) == 0:
+                            raise
+                    return stocks, fields
+            except Exception as e:
+                # 确保异常被正确传播
+                raise
         
-        # 使用重试逻辑
+        # 使用重试逻辑，每次重试都会重新创建 session
         stocks, fields = await loop.run_in_executor(
             None,
             lambda: retry_on_failure(fetch_zz500)
@@ -124,7 +180,8 @@ async def fetch_and_save_zz500():
         raise
 
 
-async def fetch_stock_daily_data(code: str, start_date: str, end_date: str, bs_wrapper: Optional[BaoStockWrapper] = None, max_retries: int = MAX_RETRIES) -> Optional[pd.DataFrame]:
+async def fetch_stock_daily_data(code: str, start_date: str, end_date: str, 
+    bs_wrapper: Optional[BaoStockWrapper] = None, max_retries: int = MAX_RETRIES) -> Optional[pd.DataFrame]:
     """
     获取股票日线交易数据，带重试逻辑
     
@@ -203,15 +260,19 @@ async def fetch_all_index_stocks():
         # 初始化数据库
         await init_db()
         
-        # 并发获取两个指数的数据
-        results = await asyncio.gather(
-            fetch_and_save_hs300(),
-            fetch_and_save_zz500(),
-            return_exceptions=True
-        )
+        # 串行获取两个指数的数据
+        hs300_count = 0
+        zz500_count = 0
         
-        hs300_count = results[0] if not isinstance(results[0], Exception) else 0
-        zz500_count = results[1] if not isinstance(results[1], Exception) else 0
+        try:
+            hs300_count = await fetch_and_save_hs300()
+        except Exception as e:
+            logger.error(f"获取沪深300成分股失败: {str(e)}", exc_info=True)
+        
+        try:
+            zz500_count = await fetch_and_save_zz500()
+        except Exception as e:
+            logger.error(f"获取中证500成分股失败: {str(e)}", exc_info=True)
         
         logger.info(f"成分股数据获取完成 - 沪深300: {hs300_count} 只, 中证500: {zz500_count} 只")
         
@@ -262,7 +323,12 @@ async def fetch_all_stocks_daily_data(days: int = 365):
                         
                         # 获取数据，带重试逻辑
                         def get_stock_data():
-                            return bs_wrapper.get_stock_data(code, start_date_str, end_date_str)
+                            try:
+                                return bs_wrapper.get_stock_data(code, start_date_str, end_date_str)
+                            except (UnicodeDecodeError, UnicodeError, IndexError, KeyError) as e:
+                                # 编码或解析错误，需要重试
+                                logger.warning(f"获取股票 {code} 数据时出现编码/解析错误: {str(e)}")
+                                raise
                         
                         df = retry_on_failure(get_stock_data, max_retries=MAX_RETRIES)
                         
@@ -331,7 +397,12 @@ async def refresh_daily_data():
                         
                         # 获取最近30天的数据，带重试逻辑
                         def get_stock_data():
-                            return bs_wrapper.get_stock_data(code, start_date_str, end_date_str)
+                            try:
+                                return bs_wrapper.get_stock_data(code, start_date_str, end_date_str)
+                            except (UnicodeDecodeError, UnicodeError, IndexError, KeyError) as e:
+                                # 编码或解析错误，需要重试
+                                logger.warning(f"刷新股票 {code} 数据时出现编码/解析错误: {str(e)}")
+                                raise
                         
                         df = retry_on_failure(get_stock_data, max_retries=MAX_RETRIES)
                         

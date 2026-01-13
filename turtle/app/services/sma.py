@@ -1,4 +1,7 @@
 import backtrader as bt
+import logging
+
+logger = logging.getLogger("app")
 
 debug = False
 win_prob = 0
@@ -25,7 +28,9 @@ class SmaCross(bt.SignalStrategy):
         ''' Logging function for this strategy'''
         if debug:
             dt = dt or self.datas[0].datetime.date(0)
-            print('%s, %s' % (dt.isoformat(), txt))
+            logger.info(f"{dt.isoformat()}, {txt}")
+        else:
+            logger.debug(txt)
 
     def next(self):
          """ 在每根K线执行交易检查 """

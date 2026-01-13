@@ -20,7 +20,7 @@ passwd = str(os.environ.get("EMAIL_PASSWD"))
 def send_mail(subject, content):
     send_email_smtp(
         subject=subject,
-        body=markdown.markdown(content),
+        body=content,
         to_emails=[receiver],
         auth_code=passwd,
     )

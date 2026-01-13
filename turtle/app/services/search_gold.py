@@ -9,6 +9,7 @@ import app.services.notification as notification
 from app.services.llm_agent import ask_llm
 from app.services.database import get_index_stocks, get_stock_daily_data_from_db
 from app.utils.logger import logger
+from app.utils.main_board_checker import is_main_board
 
 try:
     # load environment variables from .env file (requires `python-dotenv`)
@@ -173,7 +174,7 @@ async def do_search():
             continue
         
         # 从数据库读取数据并检测金叉
-        golden_cross_df = await detect_golden_cross_from_db(stock_list, start_date, end_date, 3)
+        golden_cross_df = await detect_golden_cross_from_db(stock_list, start_date, end_date, 7)
         
         # 保存金叉结果
         os.makedirs('data', exist_ok=True)
@@ -186,6 +187,10 @@ async def do_search():
         for _, row in golden_cross_df.iterrows():
             code = row['Code']
             stock_name = row.get('Name', code)
+
+            if not is_main_board(code):
+                logger.info(f"股票 {code} {stock_name} 不是主板股票，跳过")
+                continue
             
             # 从数据库读取股票交易数据
             stock_data = await get_stock_daily_data_from_db(code, start_date, end_date)

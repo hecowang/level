@@ -1,5 +1,8 @@
 import baostock as bs
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 class BaoStockWrapper:
     def __enter__(self):
@@ -8,7 +11,11 @@ class BaoStockWrapper:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        bs.logout()
+        try:
+            bs.logout()
+        except Exception as e:
+            # logout 失败不影响主流程，只记录警告
+            logger.warning(f"logout 失败: {str(e)}")
 
     def get_stock_data(self, code, start_date, end_date):
         rs = bs.query_history_k_data_plus(code,

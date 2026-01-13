@@ -26,6 +26,7 @@ from app.services.database import (
     get_stock_data_last_update_date, get_stock_daily_data_from_db
 )
 from app.services.search_gold import run_search_gold_task
+from app.services.search_macd_gold import run_search_macd_gold_task
 from app.services import sma
 
 router = APIRouter(
@@ -530,7 +531,7 @@ async def list_mcp_prompts():
 
 # ==================== 选股任务接口 ====================
 
-@router.post("/api/search/gold")
+@router.post("/api/search/sma-gold")
 async def run_search_gold():
     """
     执行选股任务（金叉策略）
@@ -567,6 +568,45 @@ async def run_search_gold():
     except Exception as e:
         logger.error(f"选股任务执行失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"选股任务执行失败: {str(e)}")
+
+
+@router.post("/api/search/macd-gold")
+async def run_search_macd_gold():
+    """
+    执行MACD选股任务（MACD金叉策略）
+    
+    该接口会执行以下操作：
+    1. 检测沪深300和中证500成分股中的MACD金叉信号
+    2. 对符合条件的股票进行MACD策略回测分析
+    3. 筛选出收益率和胜率符合条件的股票
+    4. 发送邮件通知结果
+    
+    Returns:
+        选股结果列表，每个结果包含：股票代码、名称、平均收益、平均收益率、胜率
+    """
+    try:
+        logger.info("开始执行MACD选股任务...")
+        content = await run_search_macd_gold_task()
+        logger.info("MACD选股任务执行完成")
+        
+        return {
+            "success": True,
+            "message": "MACD选股任务执行成功",
+            "count": len(content) if content else 0,
+            "results": [
+                {
+                    "code": item[0],
+                    "name": item[1],
+                    "平均收益": item[2],
+                    "平均收益率": item[3],
+                    "胜率": item[4]
+                }
+                for item in content
+            ] if content else []
+        }
+    except Exception as e:
+        logger.error(f"MACD选股任务执行失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"MACD选股任务执行失败: {str(e)}")
 
 
 # ==================== SMA回测接口 ====================
