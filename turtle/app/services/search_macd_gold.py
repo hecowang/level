@@ -26,10 +26,10 @@ stocks = {
 def format_email_content(content: list[tuple]) -> str:
     """
     Description: 
-       content is a list of tuple, each tuple contains 4 elements: code, name, profit, win_prob.
+       content is a list of tuple, each tuple contains 6 elements: code, name, profit, profit_ratio, win_prob, cross_date.
        format the content to html table format.
     Args:
-        content (list[tuple]): [stock code, stock name, profit, win prob] 
+        content (list[tuple]): [stock code, stock name, profit, profit_ratio, win prob, cross_date] 
     Returns:
         str: html content for email.
     """
@@ -47,10 +47,11 @@ def format_email_content(content: list[tuple]) -> str:
             <th>回测收益</th>
             <th>回测收益率</th>
             <th>胜率</th>
+            <th>金叉日期</th>
         </tr>
     """
 
-    for code, name, avg_profit, avg_profit_ratio, win_prob in content:
+    for code, name, avg_profit, avg_profit_ratio, win_prob, cross_date in content:
         html += f"""
         <tr>
             <td>{code}</td>
@@ -58,6 +59,7 @@ def format_email_content(content: list[tuple]) -> str:
             <td>{avg_profit:.2f}</td>
             <td>{avg_profit_ratio:.2f}</td>
             <td>{win_prob:.2f}</td>
+            <td>{cross_date}</td>
         </tr>
         """
 
@@ -190,7 +192,7 @@ async def do_search():
             continue
         
         # 从数据库读取数据并检测MACD金叉
-        golden_cross_df = await detect_macd_golden_cross_from_db(stock_list, start_date, end_date, 7)
+        golden_cross_df = await detect_macd_golden_cross_from_db(stock_list, start_date, end_date, 3)
         
         # 保存MACD金叉结果
         os.makedirs('data', exist_ok=True)
@@ -203,6 +205,7 @@ async def do_search():
         for _, row in golden_cross_df.iterrows():
             code = row['Code']
             stock_name = row.get('Name', code)
+            cross_date = row.get('Last Cross Date')
 
             if not is_main_board(code):
                 logger.info(f"股票 {code} {stock_name} 不是主板股票，跳过")
@@ -228,10 +231,19 @@ async def do_search():
             avg_profit, avg_profit_ratio, win_prob = macd.runstrat(data)
             
             if avg_profit_ratio >= 0.02 and win_prob >= 0.5:
+                # 格式化金叉日期
+                if pd.notna(cross_date):
+                    if isinstance(cross_date, pd.Timestamp):
+                        cross_date_str = cross_date.strftime("%Y-%m-%d")
+                    else:
+                        cross_date_str = str(cross_date)
+                else:
+                    cross_date_str = "未知"
+                
                 logger.info(f"macd 🎉 盈利: {code} {stock_name}. avg profit={avg_profit:.2f}. " + \
-                    f"avg profit ratio = {avg_profit_ratio:.2f}. win probability={win_prob:.2f}")
-                content.append((code, stock_name, avg_profit, avg_profit_ratio, win_prob))
-                stock_to_ask_llm.append((code, stock_name, avg_profit, avg_profit_ratio, win_prob))
+                    f"avg profit ratio = {avg_profit_ratio:.2f}. win probability={win_prob:.2f}. cross date={cross_date_str}")
+                content.append((code, stock_name, avg_profit, avg_profit_ratio, win_prob, cross_date_str))
+                stock_to_ask_llm.append((code, stock_name, avg_profit, avg_profit_ratio, win_prob, cross_date_str))
 
         logger.info("MACD Backtrade analysis done.")
         logger.info(f"Finish {stock_cls}")

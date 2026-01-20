@@ -174,7 +174,7 @@ async def do_search():
             continue
         
         # 从数据库读取数据并检测金叉
-        golden_cross_df = await detect_golden_cross_from_db(stock_list, start_date, end_date, 7)
+        golden_cross_df = await detect_golden_cross_from_db(stock_list, start_date, end_date, 3)
         
         # 保存金叉结果
         os.makedirs('data', exist_ok=True)

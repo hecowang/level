@@ -64,14 +64,14 @@ async def lifespan(app: FastAPI):
     
     # 定时刷新任务
     async def daily_refresh_task():
-        """每天刷新数据任务，每天凌晨2点执行"""
+        """每天刷新数据任务，每天20点执行"""
         while True:
             try:
-                # 计算到下一个凌晨2点的时间
+                # 计算到下一个20点的时间
                 now = datetime.now()
-                target_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
+                target_time = now.replace(hour=20, minute=0, second=0, microsecond=0)
                 
-                # 如果今天已经过了2点，就等到明天2点
+                # 如果今天已经过了20点，就等到明天20点
                 if now >= target_time:
                     target_time = target_time + timedelta(days=1)
                 
@@ -153,6 +153,23 @@ class SMABacktestResponse(BaseModel):
     hold_days: int = Field(..., description="使用的持有天数")
 
 
+class SMATrendResponse(BaseModel):
+    """SMA趋势响应模型"""
+    code: str
+    name: Optional[str] = Field(None, description="股票名称")
+    success: bool
+    message: str
+    is_upward_trend: bool = Field(..., description="是否处于上升趋势")
+    current_price: float = Field(..., description="当前收盘价")
+    sma5: float = Field(..., description="5日均线值")
+    sma10: float = Field(..., description="10日均线值")
+    sma5_trend: str = Field(..., description="SMA5趋势：上升/下降/持平")
+    sma10_trend: str = Field(..., description="SMA10趋势：上升/下降/持平")
+    golden_cross: bool = Field(..., description="是否处于金叉状态（SMA5在SMA10之上）")
+    price_above_sma5: bool = Field(..., description="价格是否在SMA5之上")
+    price_above_sma10: bool = Field(..., description="价格是否在SMA10之上")
+
+
 class StockDataResponse(BaseModel):
     """股票数据响应模型"""
     code: str
@@ -205,10 +222,35 @@ async def root():
         "message": "股票数据查询服务",
         "version": "1.0.0",
         "endpoints": {
-            "stock_data": "/api/data",
-            "stock_data_db": "/api/data/db",
-            "mcp_tools": "/mcp/v1/tools",
-            "mcp_tools_call": "/mcp/v1/tools/call"
+            "数据查询": {
+                "get_stock_data": "GET /api/data",
+                "post_stock_data": "POST /api/data",
+                "get_stock_data_from_db": "GET /api/data/db",
+                "get_stock_indicators": "GET /api/indicators"
+            },
+            "成分股列表": {
+                "get_hs300_stocks": "GET /api/list/hs300",
+                "get_zz500_stocks": "GET /api/list/zz500",
+                "get_hs300_stocks_from_db": "GET /api/list/hs300/db",
+                "get_zz500_stocks_from_db": "GET /api/list/zz500/db"
+            },
+            "数据刷新": {
+                "refresh_daily_data": "POST /api/refresh/daily-data"
+            },
+            "选股任务": {
+                "search_sma_gold": "POST /api/search/sma-gold",
+                "search_macd_gold": "POST /api/search/macd-gold"
+            },
+            "回测": {
+                "sma_backtest": "POST /api/sma/backtest",
+                "check_sma_trend": "GET /api/sma/trend"
+            },
+            "MCP协议": {
+                "list_mcp_tools": "GET /mcp/v1/tools",
+                "call_mcp_tool": "POST /mcp/v1/tools/call",
+                "list_mcp_resources": "GET /mcp/v1/resources",
+                "list_mcp_prompts": "GET /mcp/v1/prompts"
+            }
         }
     }
 
@@ -636,6 +678,40 @@ async def list_mcp_prompts():
     }
 
 
+# ==================== 数据刷新接口 ====================
+
+@router.post("/api/refresh/daily-data")
+async def refresh_daily_data_api():
+    """
+    手动执行每日数据刷新任务
+    
+    该接口会执行以下操作：
+    1. 刷新成分股列表（可能发生变化）
+    2. 刷新所有股票的最新交易数据（只获取缺失的日期）
+    
+    Returns:
+        刷新任务执行结果
+    """
+    try:
+        logger.info("手动触发每日数据刷新任务...")
+        
+        # 先刷新成分股列表（可能发生变化）
+        await fetch_all_index_stocks()
+        # 然后刷新交易数据
+        await refresh_daily_data()
+        
+        logger.info("每日数据刷新任务执行完成")
+        
+        return {
+            "success": True,
+            "message": "每日数据刷新任务执行成功",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        logger.error(f"每日数据刷新任务执行失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"每日数据刷新任务执行失败: {str(e)}")
+
+
 # ==================== 选股任务接口 ====================
 
 @router.post("/api/search/sma-gold")
@@ -706,7 +782,8 @@ async def run_search_macd_gold():
                     "name": item[1],
                     "平均收益": item[2],
                     "平均收益率": item[3],
-                    "胜率": item[4]
+                    "胜率": item[4],
+                    "金叉日期": item[5]
                 }
                 for item in content
             ] if content else []
@@ -813,3 +890,128 @@ async def sma_backtest(request: SMABacktestRequest):
     except Exception as e:
         logger.error(f"SMA回测失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"SMA回测失败: {str(e)}")
+
+
+@router.get("/api/sma/trend", response_model=SMATrendResponse)
+async def check_sma_trend(
+    code: str = Query(..., description="股票代码，例如：sh.600000")
+):
+    """
+    检查股票SMA是否处于上升趋势
+    
+    该接口会分析股票的SMA趋势，判断是否处于上升趋势。
+    判断标准包括：
+    1. SMA5是否在SMA10之上（金叉状态）
+    2. SMA5和SMA10是否在上升
+    3. 价格是否在SMA之上
+    
+    Args:
+        code: 股票代码，例如：sh.600000（上海）或 sz.000001（深圳）
+    
+    Returns:
+        SMA趋势分析结果
+    """
+    try:
+        logger.info(f"开始检查股票 {code} 的SMA趋势...")
+        
+        # 计算日期范围（至少需要10天数据来计算SMA10）
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=60)  # 多获取几天以确保有足够数据
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        
+        # 从数据库获取股票数据
+        stock_data = await get_stock_daily_data_from_db(code, start_date_str, end_date_str)
+        
+        if not stock_data:
+            raise HTTPException(status_code=404, detail=f"未找到股票 {code} 的数据")
+        
+        # 转换为DataFrame
+        df = pd.DataFrame(stock_data)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        # 确保数值列是数值类型
+        for col in ['open', 'high', 'low', 'close', 'volume', 'amount']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        if len(df) < 10:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"数据不足，需要至少10天数据，当前只有 {len(df)} 天"
+            )
+        
+        # 计算SMA5和SMA10
+        df['SMA5'] = df['close'].rolling(window=5).mean()
+        df['SMA10'] = df['close'].rolling(window=10).mean()
+        
+        # 获取最新数据
+        latest = df.iloc[-1]
+        prev_5 = df.iloc[-6] if len(df) >= 6 else df.iloc[-1]  # 5天前
+        prev_10 = df.iloc[-11] if len(df) >= 11 else df.iloc[-1]  # 10天前
+        
+        current_price = float(latest['close'])
+        sma5_current = float(latest['SMA5'])
+        sma10_current = float(latest['SMA10'])
+        
+        # 判断SMA5趋势
+        sma5_prev = float(prev_5['SMA5']) if pd.notna(prev_5['SMA5']) else sma5_current
+        if sma5_current > sma5_prev * 1.001:  # 允许0.1%的误差
+            sma5_trend = "上升"
+        elif sma5_current < sma5_prev * 0.999:
+            sma5_trend = "下降"
+        else:
+            sma5_trend = "持平"
+        
+        # 判断SMA10趋势
+        sma10_prev = float(prev_10['SMA10']) if pd.notna(prev_10['SMA10']) else sma10_current
+        if sma10_current > sma10_prev * 1.001:
+            sma10_trend = "上升"
+        elif sma10_current < sma10_prev * 0.999:
+            sma10_trend = "下降"
+        else:
+            sma10_trend = "持平"
+        
+        # 判断是否金叉（SMA5在SMA10之上）
+        golden_cross = sma5_current > sma10_current
+        
+        # 判断价格是否在SMA之上
+        price_above_sma5 = current_price > sma5_current
+        price_above_sma10 = current_price > sma10_current
+        
+        # 综合判断是否处于上升趋势
+        # 上升趋势的条件：金叉 + SMA5上升 + 价格在SMA5之上
+        is_upward_trend = golden_cross and sma5_trend == "上升" and price_above_sma5
+        
+        # 获取股票名称
+        stock_name = await get_stock_name(code)
+        
+        logger.info(
+            f"SMA趋势检查完成 - 股票: {code}, "
+            f"上升趋势: {is_upward_trend}, "
+            f"SMA5: {sma5_current:.2f}, SMA10: {sma10_current:.2f}, "
+            f"金叉: {golden_cross}"
+        )
+        
+        return SMATrendResponse(
+            code=code,
+            name=stock_name,
+            success=True,
+            message="SMA趋势检查完成",
+            is_upward_trend=is_upward_trend,
+            current_price=round(current_price, 2),
+            sma5=round(sma5_current, 2),
+            sma10=round(sma10_current, 2),
+            sma5_trend=sma5_trend,
+            sma10_trend=sma10_trend,
+            golden_cross=golden_cross,
+            price_above_sma5=price_above_sma5,
+            price_above_sma10=price_above_sma10
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"检查股票 {code} SMA趋势失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"检查SMA趋势失败: {str(e)}")
