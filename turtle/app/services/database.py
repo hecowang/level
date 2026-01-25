@@ -191,6 +191,17 @@ async def get_all_stock_codes() -> List[str]:
             return [row[0] for row in rows]
 
 
+async def get_all_stock_codes_with_name() -> List[Dict]:
+    """获取所有成分股的股票代码和名称"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT DISTINCT code, name FROM index_stocks ORDER BY code"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
 async def get_all_stock_codes_with_date() -> List[Dict]:
     """获取所有成分股的股票代码和更新日期"""
     async with aiosqlite.connect(DB_PATH) as db:

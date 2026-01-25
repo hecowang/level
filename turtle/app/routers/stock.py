@@ -24,7 +24,7 @@ from app.services.background_tasks import (
 from app.services.database import (
     init_db, get_index_stocks, get_stock_count,
     get_stock_data_last_update_date, get_stock_daily_data_from_db,
-    get_stock_name
+    get_stock_name, get_all_stock_codes, get_all_stock_codes_with_name
 )
 from app.services.search_gold import run_search_gold_task
 from app.services.search_macd_gold import run_search_macd_gold_task
@@ -233,7 +233,8 @@ async def root():
                 "get_hs300_stocks": "GET /api/list/hs300",
                 "get_zz500_stocks": "GET /api/list/zz500",
                 "get_hs300_stocks_from_db": "GET /api/list/hs300/db",
-                "get_zz500_stocks_from_db": "GET /api/list/zz500/db"
+                "get_zz500_stocks_from_db": "GET /api/list/zz500/db",
+                "get_all_stock_codes": "GET /api/list/all"
             },
             "数据刷新": {
                 "refresh_daily_data": "POST /api/refresh/daily-data"
@@ -480,6 +481,21 @@ async def get_zz500_stocks_from_db():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"从数据库获取中证500成分股失败: {str(e)}")
+
+
+@router.get("/api/list/all")
+async def get_all_stock_codes_api():
+    """获取所有成分股的股票代码列表（包含股票名称）"""
+    try:
+        stocks = await get_all_stock_codes_with_name()
+        return {
+            "count": len(stocks),
+            "stocks": stocks,
+            "source": "database"
+        }
+    except Exception as e:
+        logger.error(f"获取所有股票代码失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取所有股票代码失败: {str(e)}")
 
 
 @router.get("/api/data/db", response_model=StockDataResponse)
