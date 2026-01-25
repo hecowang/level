@@ -226,6 +226,7 @@ async def root():
                 "get_stock_data": "GET /api/data",
                 "post_stock_data": "POST /api/data",
                 "get_stock_data_from_db": "GET /api/data/db",
+                "get_stock_data_recent": "GET /api/data/recent",
                 "get_stock_indicators": "GET /api/indicators"
             },
             "成分股列表": {
@@ -512,6 +513,44 @@ async def get_stock_data_from_db(
     except Exception as e:
         logger.error(f"从数据库获取股票数据失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"从数据库获取股票数据失败: {str(e)}")
+
+
+@router.get("/api/data/recent", response_model=StockDataResponse)
+async def get_stock_data_recent(
+    code: str = Query(..., description="股票代码，例如：sh.600000"),
+    last_days: int = Query(7, description="获取最近N天的数据，默认为7天", ge=1, le=365)
+):
+    """
+    从数据库获取股票最近N天的K线数据
+    
+    Args:
+        code: 股票代码，例如：sh.600000（上海）或 sz.000001（深圳）
+        last_days: 获取最近N天的数据，默认为7天，范围1-365天
+    
+    Returns:
+        股票最近N天的K线数据
+    """
+    try:
+        # 计算日期范围
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=last_days)
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        
+        # 从数据库获取数据
+        data = await get_stock_daily_data_from_db(code, start_date_str, end_date_str)
+        
+        return StockDataResponse(
+            code=code,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            data=data,
+            count=len(data),
+            source="database"
+        )
+    except Exception as e:
+        logger.error(f"从数据库获取股票最近{last_days}天数据失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"从数据库获取股票最近{last_days}天数据失败: {str(e)}")
 
 
 # ==================== MCP协议支持 ====================
